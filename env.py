@@ -2,10 +2,6 @@ import numpy as np
 import json
 from utils import build_ou_process
 
-import numpy as np
-import json
-from utils import build_ou_process
-
 class Environment:
     """
     L'ambiente rappresenta il problema di ottimizzazione del portafoglio.
@@ -40,7 +36,8 @@ class Environment:
         commission_rate=0.0025,    # Commissione percentuale (0.25%)
         min_commission=1.0,        # Commissione minima
         trading_frequency_penalty_factor=0.0,  # Fattore di penalità per trading frequente
-        position_stability_bonus_factor=0.0    # Fattore di bonus per stabilità posizione
+        position_stability_bonus_factor=0.0,    # Fattore di bonus per stabilità posizione
+        initial_capital=10000
     ):
         self.sigma = sigma
         self.theta = theta
@@ -79,6 +76,10 @@ class Environment:
         # Nuovi parametri per controllare il comportamento di trading
         self.trading_frequency_penalty_factor = trading_frequency_penalty_factor
         self.position_stability_bonus_factor = position_stability_bonus_factor
+
+        # Nuovi attributi per il tracking del portafoglio
+        self.initial_capital = initial_capital
+        self.cash = initial_capital
         
         # Inizializzazione delle liste per tracciare lo storico
         self.position_history = []
@@ -154,6 +155,8 @@ class Environment:
         self.signal = build_ou_process(self.T, self.sigma, self.theta, random_state)
         self.it = 0
         self.pi = 0
+        self.cash = self.initial_capital  # Reset del cash
+
         
         # Gestione dell'indice nei dati reali
         if self.df is not None:
@@ -362,7 +365,14 @@ class Environment:
             else:
                 # Nessuna operazione, nessun costo
                 trading_cost = 0
-            
+
+            # Calcola il delta della posizione (numero di azioni acquistate/vendute)
+            trade_delta = pi_next - pi_prev
+
+            # Aggiorna il cash: se trade_delta è positivo significa acquisto (cash diminuisce),
+            # se negativo significa vendita (cash aumenta, perché - (negativo * price) è positivo)
+            self.cash -= (trade_delta * current_price) + trading_cost
+                        
             # 3. Penalità per dimensione della posizione (controllo del rischio)
             position_penalty = self.lambd * pi_next ** 2 * self.squared_risk
             
@@ -427,236 +437,13 @@ class Environment:
         self.state = (self.p, self.pi)
 
         return reward
-
-    # I metodi test() e test_apply() che erano presenti nell'originale li manteniamo
-    def test(
-        self, agent, model, total_episodes=100, random_states=None, noise_seeds=None
-    ):
+    def get_portfolio_value(self):
         """
-        Description
-        ---------------
-        Test a model on a number of simulated episodes and get the average cumulative
-        reward.
-
-        Parameters
-        ---------------
-        agent          : Agent object, the agent that loads the model.
-        model          : Actor object, the actor network.
-        total_episodes : Int, number of episodes to test.
-        random_states  : None or List of length total_episodes:
-            - if None, do not use random state when generating episodes
-              (useful to get an idea about the performance of a single model).
-            - if List, generate episodes with the values in random_states (useful when
-              comparing different models).
-
-        noise_seeds    : None or List of length total_episodes:
-                         - if None, do not use a random state when generating the additive
-                           noise of the returns
-                         - if List, generate noise with seeds in noise_seeds.
-
-        Returns
-        ---------------
-        2-tuple : - Float, average cumulative reward over the generated episodes.
-                  - Dict, cumulative reward per episode (random state).
+        Restituisce il valore totale del portafoglio:
+        cash residuo + (numero di azioni possedute * prezzo corrente).
         """
-
-        scores = {}
-        scores_cumsum = {}
-        pnls = {}
-        positions = {}
-        agent.actor_local = model
-        if random_states is not None:
-            assert total_episodes == len(
-                random_states
-            ), "random_states should be a list of length total_episodes!"
-
-        cumulative_rewards = []
-        cumulative_pnls = []
-        for episode in range(total_episodes):
-            episode_rewards = []
-            episode_pnls = []
-            episode_positions = [0]
-            random_state = None if random_states is None else random_states[episode]
-            noise_seed = None if noise_seeds is None else noise_seeds[episode]
-            self.reset(random_state, noise_seed)
-            state = self.get_state()
-            done = self.done
-            while not done:
-                action = agent.act(state, noise=False)
-                pi_next = np.clip(self.pi + action, -self.max_pos, self.max_pos)
-                episode_positions.append(pi_next)
-                reward = self.step(action)
-                pnl = reward + (self.lambd * self.pi ** 2) * self.squared_risk
-                state = self.get_state()
-                done = self.done
-                episode_rewards.append(reward)
-                episode_pnls.append(pnl)
-                if done:
-                    total_reward = np.sum(episode_rewards)
-                    total_pnl = np.sum(episode_pnls)
-                    if random_states is not None:
-                        scores[random_states[episode]] = total_reward
-                        scores_cumsum[random_states[episode]] = np.cumsum(
-                            episode_rewards
-                        )
-                        pnls[random_states[episode]] = total_pnl
-                        positions[random_states[episode]] = episode_positions
-
-                    cumulative_rewards.append(total_reward)
-                    cumulative_pnls.append(total_pnl)
-                    # print('Episode: {}'.format(episode),
-                    #      'Total reward: {:.2f}'.format(total_reward))
-
-        return (
-            np.mean(cumulative_rewards),
-            scores,
-            scores_cumsum,
-            np.mean(cumulative_pnls),
-            positions,
-        )
-
-    def apply(self, state, thresh=1, lambd=None, psi=None):
-        """
-        Description
-        ---------------
-        Apply solution with a certain band and slope outside the band, otherwise apply the
-        myopic solution.
-
-        Parameters
-        ---------------
-        state      : 2-tuple, the current state.
-        thresh     : Float>0, price threshold to make a trade.
-        lambd      : Float, slope of the solution in the non-banded region.
-        psi        : Float, band width of the solution.
-
-        Returns
-        ---------------
-        Float, the trade to make in state according to this function.
-        """
-
-        p, pi = state
-        if lambd is None:
-            lambd = self.lambd
-
-        if psi is None:
-            psi = self.psi
-
-        if not self.squared_risk:
-            if abs(p) < thresh:
-                return 0
-            elif p >= thresh:
-                return self.max_pos - pi
-            elif p <= -thresh:
-                return -self.max_pos - pi
-
-        else:
-            if self.cost == "trade_0":
-                return p / (2 * lambd) - pi
-
-            elif self.cost == "trade_l2":
-                return (p + 2 * psi * pi) / (2 * (lambd + psi)) - pi
-
-            elif self.cost == "trade_l1":
-                if p < -psi + 2 * lambd * pi:
-                    return (p + psi) / (2 * lambd) - pi
-                elif -psi + 2 * lambd * pi <= p <= psi + 2 * lambd * pi:
-                    return 0
-                elif p > psi + 2 * lambd * pi:
-                    return (p - psi) / (2 * lambd) - pi
-
-    def test_apply(
-        self,
-        total_episodes=10,
-        random_states=None,
-        thresh=1,
-        lambd=None,
-        psi=None,
-        noise_seeds=None,
-        max_point=6.0,
-        n_points=1000,
-    ):
-        """
-        Description
-        ---------------
-        Test a function with certain slope and band width for each reward model (with and
-        without trading cost, and depending on the penalty when trading cost is used).
-        When psi and lambd are not provided, use the myopic solution.
-
-        Parameters
-        ---------------
-        total_episodes : Int, number of episodes to test.
-        random_states  : None or List of length total_episodes:
-                         - if None, do not use random state when generating episodes
-                           (useful to get an idea about the performance of a single
-                           model).
-                         - if List, generate episodes with the values in random_states
-                           (useful when comparing different models).
-        lambd          : Float, slope of the solution in the non-banded region.
-        psi            : Float, band width of the solution.
-        max_point      : Float, the maximum point in the grid [0, max_point]
-        n_points       : Int, the number of points in the grid.
-
-        Returns
-        ---------------
-        5-tuple : - Float, average cumulative reward over the generated episodes.
-                  - Dict, cumulative reward per episode (random state).
-                  - Dict, cumulative sum of the reward at each time step per episode.
-                  - Dict, pnl per episode.
-                  - Dict, positions per episode.
-        """
-
-        scores = {}
-        scores_cumsum = {}
-        pnls = {}
-        positions = {}
-        if random_states is not None:
-            assert total_episodes == len(
-                random_states
-            ), "random_states should be a list of length total_episodes!"
-
-        cumulative_rewards = []
-        cumulative_pnls = []
-        for episode in range(total_episodes):
-            episode_rewards = []
-            episode_pnls = []
-            episode_positions = [0]
-            random_state = None if random_states is None else random_states[episode]
-            noise_seed = None if noise_seeds is None else noise_seeds[episode]
-            self.reset(random_state, noise_seed)
-            state = self.get_state()
-            done = self.done
-            while not done:
-                action = self.apply(state, thresh=thresh, lambd=lambd, psi=psi)
-                reward = self.step(action)
-                pnl = reward + (self.lambd * self.pi ** 2) * self.squared_risk
-                state = self.get_state()
-                done = self.done
-                episode_rewards.append(reward)
-                episode_pnls.append(pnl)
-                episode_positions.append(state[1])
-                if done:
-                    total_reward = np.sum(episode_rewards)
-                    total_pnl = np.sum(episode_pnls)
-                    if random_states is not None:
-                        scores[random_states[episode]] = total_reward
-                        scores_cumsum[random_states[episode]] = np.cumsum(
-                            episode_rewards
-                        )
-                        pnls[random_states[episode]] = episode_pnls
-                        positions[random_states[episode]] = episode_positions
-
-                    cumulative_rewards.append(total_reward)
-                    cumulative_pnls.append(total_pnl)
-                    # print('Episode: {}'.format(episode),
-                    #       'Total reward: {:.2f}'.format(total_reward))
-
-        return (
-            np.mean(cumulative_rewards),
-            scores,
-            scores_cumsum,
-            np.mean(cumulative_pnls),
-            positions,
-        )
+        return self.cash + self.pi * self.p
+    
     # I metodi test() e test_apply() che erano presenti nell'originale li manteniamo
     def test(
         self, agent, model, total_episodes=100, random_states=None, noise_seeds=None

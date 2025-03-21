@@ -13,191 +13,191 @@ class Environment:
 
 # Aggiornamento al metodo __init__ della classe Environment
 
-    def __init__(
-        self,
-        sigma=0.5,
-        theta=1.0,
-        T=1000,
-        random_state=None,
-        lambd=0.5,
-        psi=0.5,
-        cost="trade_0",
-        max_pos=10,
-        squared_risk=True,
-        penalty="none",
-        alpha=10,
-        beta=10,
-        clip=True,
-        noise=False,
-        noise_std=10,
-        noise_seed=None,
-        scale_reward=10,
-        df=None,
-        max_step=100,
-        norm_params_path=None,   # Percorso al file JSON con i parametri Min-Max
-        norm_columns=None,       # Lista delle colonne (feature) da utilizzare, in ordine
-        free_trades_per_month=10,  # Numero di operazioni gratuite al mese
-        commission_rate=0.0025,    # Commissione percentuale (0.25%)
-        min_commission=1.0,        # Commissione minima
-        trading_frequency_penalty_factor=0.0,  # Fattore di penalità per trading frequente
-        position_stability_bonus_factor=0.0    # Fattore di bonus per stabilità posizione
-    ):
-        self.sigma = sigma
-        self.theta = theta
-        self.T = T
-        self.lambd = lambd
-        self.psi = psi
-        self.cost = cost
-        self.max_pos = max_pos
-        self.squared_risk = squared_risk
-        self.random_state = random_state
-        self.signal = build_ou_process(T, sigma, theta, random_state)
+def __init__(
+    self,
+    sigma=0.5,
+    theta=1.0,
+    T=1000,
+    random_state=None,
+    lambd=0.5,
+    psi=0.5,
+    cost="trade_0",
+    max_pos=10,
+    squared_risk=True,
+    penalty="none",
+    alpha=10,
+    beta=10,
+    clip=True,
+    noise=False,
+    noise_std=10,
+    noise_seed=None,
+    scale_reward=10,
+    df=None,
+    max_step=100,
+    norm_params_path=None,   # Percorso al file JSON con i parametri Min-Max
+    norm_columns=None,       # Lista delle colonne (feature) da utilizzare, in ordine
+    free_trades_per_month=10,  # Numero di operazioni gratuite al mese
+    commission_rate=0.0025,    # Commissione percentuale (0.25%)
+    min_commission=1.0,        # Commissione minima
+    trading_frequency_penalty_factor=0.0,  # Fattore di penalità per trading frequente
+    position_stability_bonus_factor=0.0    # Fattore di bonus per stabilità posizione
+):
+    self.sigma = sigma
+    self.theta = theta
+    self.T = T
+    self.lambd = lambd
+    self.psi = psi
+    self.cost = cost
+    self.max_pos = max_pos
+    self.squared_risk = squared_risk
+    self.random_state = random_state
+    self.signal = build_ou_process(T, sigma, theta, random_state)
+    self.it = 0
+    self.pi = 0
+    self.p = self.signal[self.it + 1]
+    self.state = (self.p, self.pi)  # Stato "base" (vecchio formato)
+    self.done = False
+    self.action_size = 1
+    self.penalty = penalty
+    self.alpha = alpha
+    self.beta = beta
+    self.clip = clip
+    self.scale_reward = scale_reward
+    self.noise = noise
+    self.noise_std = noise_std
+    self.noise_seed = noise_seed
+    self.df = df
+    self.current_index = 0
+    # Parametri per le commissioni di trading
+    self.free_trades_per_month = free_trades_per_month
+    self.trade_count = 0  # Contatore delle operazioni effettuate
+    self.commission_rate = commission_rate
+    self.min_commission = min_commission
+    self.month_start_index = 0  # Indice di inizio del mese corrente
+    self.current_month = None  # Per tenere traccia del mese corrente
+    
+    # Nuovi parametri per controllare il comportamento di trading
+    self.trading_frequency_penalty_factor = trading_frequency_penalty_factor
+    self.position_stability_bonus_factor = position_stability_bonus_factor
+    
+    # Inizializzazione delle liste per tracciare lo storico
+    self.position_history = []
+    self.action_history = []
+    
+    if df is not None:
+        self.T = len(df) - 1 # La lunghezza massima sarà il dataframe
+    if noise:
+        if noise_seed is None:
+            self.noise_array = np.random.normal(0, noise_std, T)
+        else:
+            rng = np.random.RandomState(noise_seed)
+            self.noise_array = rng.normal(0, noise_std, T)
+
+    # Carica i parametri di normalizzazione, se fornito
+    if norm_params_path is not None:
+        with open(norm_params_path, 'r') as f:
+            self.norm_params = json.load(f)
+    else:
+        self.norm_params = None
+
+    # Definisci l'ordine esatto delle feature da utilizzare.
+    if norm_columns is not None:
+        self.norm_columns = norm_columns
+    else:
+        # Esempio: le 64 feature da utilizzare
+        self.norm_columns = [
+            "open", "volume", "change", "day", "week", "adjCloseGold", "adjCloseSpy",
+            "Credit_Spread", "Log_Close", "m_plus", "m_minus", "drawdown", "drawup",
+            "s_plus", "s_minus", "upper_bound", "lower_bound", "avg_duration", "avg_depth",
+            "cdar_95", "VIX_Close", "MACD", "MACD_Signal", "MACD_Histogram", "SMA5",
+            "SMA10", "SMA15", "SMA20", "SMA25", "SMA30", "SMA36", "RSI5", "RSI14", "RSI20",
+            "RSI25", "ADX5", "ADX10", "ADX15", "ADX20", "ADX25", "ADX30", "ADX35",
+            "BollingerLower", "BollingerUpper", "WR5", "WR14", "WR20", "WR25",
+            "SMA5_SMA20", "SMA5_SMA36", "SMA20_SMA36", "SMA5_Above_SMA20",
+            "Golden_Cross", "Death_Cross", "BB_Position", "BB_Width",
+            "BB_Upper_Distance", "BB_Lower_Distance", "Volume_SMA20", "Volume_Change_Pct",
+            "Volume_1d_Change_Pct", "Volume_Spike", "Volume_Collapse", "GARCH_Vol",
+            "pred_lstm", "pred_gru", "pred_blstm", "pred_lstm_direction",
+            "pred_gru_direction", "pred_blstm_direction"
+        ]
+    # La dimensione dello stato è il numero di feature + 1 (per la posizione)
+    self.state_size = len(self.norm_columns) + 1
+
+    # Inizializza raw_state come dizionario con chiavi definite da norm_columns.
+    # Questo verrà aggiornato ad ogni step con i dati correnti (già normalizzati)
+    self.raw_state = {col: 0.0 for col in self.norm_columns}
+
+    def update_raw_state(self, df, current_index):
+        """
+        Aggiorna self.raw_state leggendo la riga corrente dal DataFrame df.
+        Il DataFrame df deve contenere le colonne definite in self.norm_columns.
+        """
+        row = df.iloc[current_index].to_dict()
+        missing = [col for col in self.norm_columns if col not in row]
+        if missing:
+            raise ValueError(f"Mancano le seguenti colonne nel DataFrame: {missing}")
+        self.raw_state = row
+
+    def reset(self, random_state=None, noise_seed=None, start_index=None):
+        """
+        Resetta l'ambiente per iniziare un nuovo episodio.
+        
+        Parametri:
+        - random_state: seme per la generazione del processo OU (se utilizzato)
+        - noise_seed: seme per il rumore (se utilizzato)
+        - start_index: indice iniziale nel DataFrame (se si usano dati reali)
+        
+        Returns:
+        - Vettore di stato iniziale
+        """
+        # Reset del processo OU per compatibilità con il vecchio codice
+        self.signal = build_ou_process(self.T, self.sigma, self.theta, random_state)
         self.it = 0
         self.pi = 0
-        self.p = self.signal[self.it + 1]
-        self.state = (self.p, self.pi)  # Stato "base" (vecchio formato)
+        
+        # Gestione dell'indice nei dati reali
+        if self.df is not None:
+            if start_index is not None:
+                # Se specificato un indice di partenza, usalo (con limite di sicurezza)
+                self.current_index = min(start_index, len(self.df) - self.max_step - 1)
+            else:
+                # Altrimenti possiamo partire da un punto casuale o dall'inizio
+                if random_state is not None:
+                    rng = np.random.RandomState(random_state)
+                    self.current_index = rng.randint(0, max(1, len(self.df) - self.max_step - 1))
+                else:
+                    self.current_index = 0
+            
+            # Aggiorna lo stato raw con i dati reali
+            self.update_raw_state(self.df, self.current_index)
+            
+            # Usa il prezzo di chiusura come segnale
+            if "Log_Close" in self.raw_state:
+                self.p = self.raw_state["Log_Close"]
+            elif "close" in self.raw_state:
+                self.p = self.raw_state["close"]
+            else:
+                # Fallback su un altro valore se necessario
+                self.p = 0.0
+        else:
+            # Usa il processo OU come segnale simulato
+            self.p = self.signal[self.it + 1]
+        
+        # Resetta la variabile di fine episodio
         self.done = False
-        self.action_size = 1
-        self.penalty = penalty
-        self.alpha = alpha
-        self.beta = beta
-        self.clip = clip
-        self.scale_reward = scale_reward
-        self.noise = noise
-        self.noise_std = noise_std
-        self.noise_seed = noise_seed
-        self.df = df
-        self.current_index = 0
-        # Parametri per le commissioni di trading
-        self.free_trades_per_month = free_trades_per_month
-        self.trade_count = 0  # Contatore delle operazioni effettuate
-        self.commission_rate = commission_rate
-        self.min_commission = min_commission
-        self.month_start_index = 0  # Indice di inizio del mese corrente
-        self.current_month = None  # Per tenere traccia del mese corrente
         
-        # Nuovi parametri per controllare il comportamento di trading
-        self.trading_frequency_penalty_factor = trading_frequency_penalty_factor
-        self.position_stability_bonus_factor = position_stability_bonus_factor
-        
-        # Inizializzazione delle liste per tracciare lo storico
-        self.position_history = []
-        self.action_history = []
-        
-        if df is not None:
-            self.T = len(df) - 1 # La lunghezza massima sarà il dataframe
-        if noise:
+        # Gestione del rumore (per compatibilità con il vecchio codice)
+        if self.noise:
             if noise_seed is None:
-                self.noise_array = np.random.normal(0, noise_std, T)
+                self.noise_array = np.random.normal(0, self.noise_std, self.T)
             else:
                 rng = np.random.RandomState(noise_seed)
-                self.noise_array = rng.normal(0, noise_std, T)
-
-        # Carica i parametri di normalizzazione, se fornito
-        if norm_params_path is not None:
-            with open(norm_params_path, 'r') as f:
-                self.norm_params = json.load(f)
-        else:
-            self.norm_params = None
-
-        # Definisci l'ordine esatto delle feature da utilizzare.
-        if norm_columns is not None:
-            self.norm_columns = norm_columns
-        else:
-            # Esempio: le 64 feature da utilizzare
-            self.norm_columns = [
-                "open", "volume", "change", "day", "week", "adjCloseGold", "adjCloseSpy",
-                "Credit_Spread", "Log_Close", "m_plus", "m_minus", "drawdown", "drawup",
-                "s_plus", "s_minus", "upper_bound", "lower_bound", "avg_duration", "avg_depth",
-                "cdar_95", "VIX_Close", "MACD", "MACD_Signal", "MACD_Histogram", "SMA5",
-                "SMA10", "SMA15", "SMA20", "SMA25", "SMA30", "SMA36", "RSI5", "RSI14", "RSI20",
-                "RSI25", "ADX5", "ADX10", "ADX15", "ADX20", "ADX25", "ADX30", "ADX35",
-                "BollingerLower", "BollingerUpper", "WR5", "WR14", "WR20", "WR25",
-                "SMA5_SMA20", "SMA5_SMA36", "SMA20_SMA36", "SMA5_Above_SMA20",
-                "Golden_Cross", "Death_Cross", "BB_Position", "BB_Width",
-                "BB_Upper_Distance", "BB_Lower_Distance", "Volume_SMA20", "Volume_Change_Pct",
-                "Volume_1d_Change_Pct", "Volume_Spike", "Volume_Collapse", "GARCH_Vol",
-                "pred_lstm", "pred_gru", "pred_blstm", "pred_lstm_direction",
-                "pred_gru_direction", "pred_blstm_direction"
-            ]
-        # La dimensione dello stato è il numero di feature + 1 (per la posizione)
-        self.state_size = len(self.norm_columns) + 1
-
-        # Inizializza raw_state come dizionario con chiavi definite da norm_columns.
-        # Questo verrà aggiornato ad ogni step con i dati correnti (già normalizzati)
-        self.raw_state = {col: 0.0 for col in self.norm_columns}
-
-        def update_raw_state(self, df, current_index):
-            """
-            Aggiorna self.raw_state leggendo la riga corrente dal DataFrame df.
-            Il DataFrame df deve contenere le colonne definite in self.norm_columns.
-            """
-            row = df.iloc[current_index].to_dict()
-            missing = [col for col in self.norm_columns if col not in row]
-            if missing:
-                raise ValueError(f"Mancano le seguenti colonne nel DataFrame: {missing}")
-            self.raw_state = row
-
-        def reset(self, random_state=None, noise_seed=None, start_index=None):
-            """
-            Resetta l'ambiente per iniziare un nuovo episodio.
-            
-            Parametri:
-            - random_state: seme per la generazione del processo OU (se utilizzato)
-            - noise_seed: seme per il rumore (se utilizzato)
-            - start_index: indice iniziale nel DataFrame (se si usano dati reali)
-            
-            Returns:
-            - Vettore di stato iniziale
-            """
-            # Reset del processo OU per compatibilità con il vecchio codice
-            self.signal = build_ou_process(self.T, self.sigma, self.theta, random_state)
-            self.it = 0
-            self.pi = 0
-            
-            # Gestione dell'indice nei dati reali
-            if self.df is not None:
-                if start_index is not None:
-                    # Se specificato un indice di partenza, usalo (con limite di sicurezza)
-                    self.current_index = min(start_index, len(self.df) - self.max_step - 1)
-                else:
-                    # Altrimenti possiamo partire da un punto casuale o dall'inizio
-                    if random_state is not None:
-                        rng = np.random.RandomState(random_state)
-                        self.current_index = rng.randint(0, max(1, len(self.df) - self.max_step - 1))
-                    else:
-                        self.current_index = 0
-                
-                # Aggiorna lo stato raw con i dati reali
-                self.update_raw_state(self.df, self.current_index)
-                
-                # Usa il prezzo di chiusura come segnale
-                if "Log_Close" in self.raw_state:
-                    self.p = self.raw_state["Log_Close"]
-                elif "close" in self.raw_state:
-                    self.p = self.raw_state["close"]
-                else:
-                    # Fallback su un altro valore se necessario
-                    self.p = 0.0
-            else:
-                # Usa il processo OU come segnale simulato
-                self.p = self.signal[self.it + 1]
-            
-            # Resetta la variabile di fine episodio
-            self.done = False
-            
-            # Gestione del rumore (per compatibilità con il vecchio codice)
-            if self.noise:
-                if noise_seed is None:
-                    self.noise_array = np.random.normal(0, self.noise_std, self.T)
-                else:
-                    rng = np.random.RandomState(noise_seed)
-                    self.noise_array = rng.normal(0, self.noise_std, self.T)
-            
-            # Aggiorna lo stato base per compatibilità
-            self.state = (self.p, self.pi)
+                self.noise_array = rng.normal(0, self.noise_std, self.T)
         
-            return self.get_state()
+        # Aggiorna lo stato base per compatibilità
+        self.state = (self.p, self.pi)
+    
+        return self.get_state()
 
     def update_raw_state(self, df, current_index):
         """
