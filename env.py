@@ -399,7 +399,7 @@ class Environment:
                     trend_reward = abs(pi_next) * abs(macd_hist) * 0.15
             
             # 5. Calcolo della ricompensa complessiva
-            reward = (pnl - trading_cost - position_penalty - pen - trading_frequency_penalty + stability_bonus + trend_reward) / self.scale_reward
+            reward = -1 * (pnl - trading_cost - position_penalty - pen - trading_frequency_penalty + stability_bonus + trend_reward) / self.scale_reward
             
         else:
             # Usa il vecchio sistema con processo OU simulato

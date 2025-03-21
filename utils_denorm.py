@@ -3,6 +3,27 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def verifica_parametri_normalizzazione(norm_params_path, feature_name="adjClose"):
+    """Stampa i valori min/max per una feature per aiutare a debuggare problemi di normalizzazione."""
+    norm_params = load_normalization_params(norm_params_path)
+    
+    print(f"Feature disponibili: {list(norm_params['min'].keys())}")
+    
+    if feature_name in norm_params['min'] and feature_name in norm_params['max']:
+        min_val = norm_params['min'][feature_name]
+        max_val = norm_params['max'][feature_name]
+        print(f"Feature: {feature_name}")
+        print(f"Valore minimo: {min_val}")
+        print(f"Valore massimo: {max_val}")
+        
+        # Testa la denormalizzazione con alcuni valori
+        valori_test = [0.0, 0.25, 0.5, 0.75, 1.0]
+        for val in valori_test:
+            denorm_val = val * (max_val - min_val) + min_val
+            print(f"Normalizzato {val} -> Denormalizzato {denorm_val}")
+    else:
+        print(f"Feature {feature_name} non trovata nei parametri di normalizzazione")
+
 def load_normalization_params(json_path):
     """
     Carica i parametri di normalizzazione da un file JSON.

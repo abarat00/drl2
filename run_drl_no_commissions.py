@@ -74,31 +74,30 @@ print(f"Lunghezza massima episodio: {max_steps} timestep")
 
 # Inizializza l'ambiente (senza commissioni)
 print("Inizializzazione dell'ambiente (senza commissioni)...")
+# Cambia questi parametri nell'inizializzazione dell'ambiente
 env = Environment(
     sigma=0.1,
     theta=0.1,
     T=len(df_train) - 1,
-    lambd=0.05,             # Penalità per posizioni grandi ridotta
-    psi=0.1,                # Penalità per costi di trading molto ridotta
+    lambd=0.01,             # Riduci questa penalità (originale: 0.05)
+    psi=0.05,               # Ridotto ulteriormente (originale: 0.1)
     cost="trade_l1",
-    max_pos=4.0,            # Posizione massima più grande
+    max_pos=6.0,            # Aumenta il limite di posizione (originale: 4.0)
     squared_risk=False,
     penalty="tanh",
-    alpha=2,
-    beta=2,
+    alpha=1,                # Riduci (originale: 2)
+    beta=1,                 # Riduci (originale: 2)
     clip=True,
-    scale_reward=5,
+    scale_reward=3,         # Riduci (originale: 5)
     df=df_train,
     norm_params_path=norm_params_path,
     norm_columns=norm_columns,
     max_step=max_steps,
-    # Parametri che eliminano le commissioni
-    free_trades_per_month=10000,  # Praticamente infinito
-    commission_rate=0.0,          # Commissione percentuale a zero
-    min_commission=0.0,           # Commissione minima a zero
-    # Nuovi parametri per behavior shaping
-    trading_frequency_penalty_factor=0.1,  # Leggera penalità per trading frequente
-    position_stability_bonus_factor=0.1    # Leggero bonus per stabilità
+    free_trades_per_month=10000,
+    commission_rate=0.0,
+    min_commission=0.0,
+    trading_frequency_penalty_factor=0.05,  # Riduci (originale: 0.1)
+    position_stability_bonus_factor=0.4    # Aumenta significativamente (originale: 0.1)
 )
 
 # Parametri di training
@@ -110,10 +109,10 @@ learn_freq = 20
 print("Inizializzazione dell'agente DDPG...")
 agent = Agent(
     memory_type="prioritized",
-    batch_size=256,         # Batch size grande
+    batch_size=256,
     max_step=max_steps,
-    theta=0.1,
-    sigma=0.2               # Rumore moderato
+    theta=0.05,             # Ridotto (originale: 0.1)
+    sigma=0.4               # Aumentato (originale: 0.2)
 )
 
 # Parametri per l'addestramento
@@ -152,6 +151,9 @@ print(f"I log per TensorBoard sono stati salvati in: {output_dir}/runs/")
 
 # Valutazione sul dataset di test
 print("\nAvvio della valutazione sul dataset di test...")
+
+from utils_denorm import verifica_parametri_normalizzazione
+verifica_parametri_normalizzazione(norm_params_path)
 
 # Funzione per valutare un modello
 # Modifica alla funzione evaluate_model per calcolare il P&L e altre metriche
@@ -208,7 +210,7 @@ def evaluate_model(model_file, env, agent, df_test, norm_params_path):
         done = env.done
     
     # Denormalizza i prezzi (assumendo che il prezzo sia nella feature "Log_Close" o simile)
-    price_feature = "Log_Close"  # Modifica in base alla feature che contiene il prezzo
+    price_feature = "adjClose"  # Modifica in base alla feature che contiene il prezzo
     if price_feature not in norm_params['min'] or price_feature not in norm_params['max']:
         # Cerca altre feature di prezzo comuni
         for feature in ["close", "adjClose", "price"]:
@@ -481,23 +483,38 @@ if evaluation_results:
     plt.legend()
     plt.grid(True, alpha=0.3)
     
-    # Plot del P&L cumulativo vs Buy-and-Hold
+    # Modifica nella parte del grafico che genera il P&L cumulativo
     plt.subplot(5, 1, 5)
-    
-    # P&L cumulativo della strategia
+
+    # Prima definisci cum_pnl e buy_hold_equity
     cum_pnl = np.cumsum(best_model['pnl_values'])
-    plt.plot(cum_pnl, label=f'P&L Cumulativo (${best_model["total_pnl"]:.2f})', color='purple')
-    
-    # Rendimento Buy-and-Hold
     initial_price = best_model['real_prices'][0]
     buy_hold_equity = [(p - initial_price) for p in best_model['real_prices'][1:len(cum_pnl)+1]]
-    plt.plot(buy_hold_equity, label=f'Buy & Hold ({best_model["buy_and_hold_return"]:.2f}%)', color='orange', linestyle='--')
-    
+
+    # Usa le date per il plot
+    if len(best_model['dates']) >= len(cum_pnl):
+        dates = best_model['dates'][:len(cum_pnl)]
+        plt.plot(dates, cum_pnl, label=f'P&L Cumulativo (${best_model["total_pnl"]:.2f})', color='purple')
+        plt.plot(dates, buy_hold_equity, label=f'Buy & Hold ({best_model["buy_and_hold_return"]:.2f}%)', color='orange', linestyle='--')
+        
+        # Formatta l'asse X per mostrare SOLO mese e anno (non il giorno)
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))  # Solo mese e anno
+        plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=3))  # Mostra ogni 3 mesi
+    else:
+        # Fallback se non ci sono abbastanza date
+        plt.plot(cum_pnl, label=f'P&L Cumulativo (${best_model["total_pnl"]:.2f})', color='purple')
+        plt.plot(buy_hold_equity, label=f'Buy & Hold ({best_model["buy_and_hold_return"]:.2f}%)', color='orange', linestyle='--')
+
+    plt.xticks(rotation=45)  # Ruota le etichette dell'asse x
     plt.title('P&L Cumulativo vs Buy & Hold (denormalizzato)')
-    plt.xlabel('Timestep')
+    plt.xlabel('Data')
     plt.ylabel('P&L ($)')
     plt.legend()
     plt.grid(True, alpha=0.3)
+
+    # Aggiungi più spazio in basso per le etichette dell'asse X
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)  # Dai più spazio alle etichette
     
     plt.tight_layout()
     plt.savefig(f"{output_dir}/test/best_model_performance.png")
